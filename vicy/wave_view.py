@@ -57,9 +57,9 @@ class WaveView(Gtk.DrawingArea):
             elif self.mode == "busy":
                 amp = 0.25 + 0.20 * math.sin(self.phase - i * 0.55)
                 alpha = 0.55
-            else:  # idle: gentle frozen wave
-                amp = 0.10 + 0.06 * math.sin(i * 0.7)
-                alpha = 0.28
+            else:  # idle: taller frozen wave so the pill reads at a glance
+                amp = 0.30 + 0.16 * math.sin(i * 0.7)
+                alpha = 0.40
             bh = max(1.5, amp * (cy - 4))
             cr.set_source_rgba(*config.BAR_COLOR, alpha)
             cr.move_to(x, cy - bh)
