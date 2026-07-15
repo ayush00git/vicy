@@ -1,6 +1,7 @@
 """The pill's only face: a row of frequency bars."""
 
 import math
+import random
 
 import gi
 
@@ -24,13 +25,26 @@ class WaveView(Gtk.DrawingArea):
         self.mode = "idle"  # idle | recording | busy
         self.bars = np.zeros(config.N_BARS)
         self.phase = 0.0
+        self._idle_amps = self._random_idle_pattern()
         self.set_size_request(180, 48)
         self.connect("draw", self._draw)
+
+    @staticmethod
+    def _random_idle_pattern():
+        """A fresh organic resting wave — random heights smoothed with
+        their neighbors so it looks like a frozen snippet of speech."""
+        raw = [random.uniform(0.12, 0.58) for _ in range(config.N_BARS)]
+        return [
+            (raw[max(0, i - 1)] + raw[i] + raw[min(config.N_BARS - 1, i + 1)]) / 3
+            for i in range(config.N_BARS)
+        ]
 
     def set_mode(self, mode):
         self.mode = mode
         if mode != "recording":
             self.bars = np.zeros(config.N_BARS)
+        if mode == "idle":
+            self._idle_amps = self._random_idle_pattern()
         self.queue_draw()
 
     def set_bars(self, vals):
@@ -57,8 +71,8 @@ class WaveView(Gtk.DrawingArea):
             elif self.mode == "busy":
                 amp = 0.25 + 0.20 * math.sin(self.phase - i * 0.55)
                 alpha = 0.55
-            else:  # idle: taller frozen wave so the pill reads at a glance
-                amp = 0.30 + 0.16 * math.sin(i * 0.7)
+            else:  # idle: random organic wave, regenerated each time
+                amp = self._idle_amps[i]
                 alpha = 0.40
             bh = max(1.5, amp * (cy - 4))
             cr.set_source_rgba(*config.BAR_COLOR, alpha)
