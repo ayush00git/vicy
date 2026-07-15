@@ -42,6 +42,7 @@ class Vicy(Gtk.Window):
         self._dragging = False
         self._hovered = False
         self._collapse_id = None
+        self._hover_intent_id = None
 
         self.recorder = Recorder()
         self.analyzer = SpectrumAnalyzer()
@@ -136,10 +137,25 @@ class Vicy(Gtk.Window):
         x0, y0, pw, ph = self.wave.pill_rect()
         return x0 <= event.x <= x0 + pw and y0 <= event.y <= y0 + ph
 
+    # Hover anticipation: react a beat after the pointer commits, so a
+    # cursor merely passing through never triggers a morph.
+    HOVER_IN_DELAY_MS = 70
+    HOVER_OUT_DELAY_MS = 130
+
     def _set_hovered(self, hovered):
-        if hovered != self._hovered:
-            self._hovered = hovered
+        if hovered == self._hovered:
+            return
+        self._hovered = hovered
+        if self._hover_intent_id is not None:
+            GLib.source_remove(self._hover_intent_id)
+
+        def apply():
+            self._hover_intent_id = None
             self._refresh_shape()
+            return False
+
+        delay = self.HOVER_IN_DELAY_MS if hovered else self.HOVER_OUT_DELAY_MS
+        self._hover_intent_id = GLib.timeout_add(delay, apply)
 
     def _on_crossing(self, _w, event, entered):
         if event.detail == Gdk.NotifyType.INFERIOR:
@@ -276,15 +292,14 @@ class Vicy(Gtk.Window):
             self._anim_id = GLib.timeout_add(config.FPS_MS, self._animate)
 
     def _animate(self):
+        # Only recording needs this data loop (spectrum + silence watch);
+        # the busy pulse and all visual smoothing run inside WaveView.
         if self.state == "recording":
             samples = self.recorder.tail(config.FFT_SIZE)
             if samples is not None:
                 self.wave.set_bars(self.analyzer.update(samples))
                 if self._silence_elapsed(samples):
                     self._stop_recording()
-            return True
-        if self.state == "transcribing":
-            self.wave.tick()
             return True
         self._anim_id = None
         return False
