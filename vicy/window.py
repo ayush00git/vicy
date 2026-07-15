@@ -98,6 +98,9 @@ class Vicy(Gtk.Window):
         pill = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         pill.set_name("pill")
         pill.set_border_width(6)
+        # Margins leave transparent room around the pill for its shadow.
+        for side in ("top", "bottom", "start", "end"):
+            getattr(pill, f"set_margin_{side}")(12)
         self.add(pill)
 
         self.wave = WaveView()

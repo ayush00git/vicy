@@ -37,15 +37,16 @@ N_BARS = 36
 FPS_MS = 33          # ~30 fps animation while active
 DRAG_THRESHOLD = 6   # px of motion before a click becomes a window drag
 
-# Monochrome palette: the pill is near-black, bars are white with the
-# grey shades coming from alpha over the dark background.
-BAR_COLOR = (1.0, 1.0, 1.0)
+# Monochrome light palette: the pill is white, bars are near-black with
+# the grey shades coming from alpha over the light background.
+BAR_COLOR = (0.10, 0.10, 0.12)
 
 CSS = b"""
 #vicywin { background: transparent; }
 #pill {
-    background: rgba(24, 24, 30, 0.94);
+    background: rgba(253, 253, 254, 0.97);
     border-radius: 24px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(0, 0, 0, 0.10);
+    box-shadow: 0 2px 14px rgba(0, 0, 0, 0.22);
 }
 """
