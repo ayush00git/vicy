@@ -25,8 +25,10 @@ PILL_SIZE = (192, 60)    # expanded capsule
 ORB = 48                 # collapsed circle diameter
 MORPH_SECONDS = 0.22
 
-BG = (8 / 255, 8 / 255, 10 / 255, 0.97)
-BORDER = (1.0, 1.0, 1.0, 0.10)
+# Liquid-glass body: translucent smoky base; the glass optics (sheen,
+# highlight, specular) are painted as gradient layers on top.
+BG = (14 / 255, 14 / 255, 18 / 255, 0.60)
+BORDER = (1.0, 1.0, 1.0, 0.16)
 
 
 def rounded_rect(cr, x, y, w, h, r):
@@ -132,14 +134,42 @@ class WaveView(Gtk.DrawingArea):
             cr.set_source_rgba(0, 0, 0, 0.05)
             cr.fill()
 
-        # Body and border.
+        # Body: smoky translucent base.
         rounded_rect(cr, x0, y0, pw, ph, radius)
         cr.set_source_rgba(*BG)
         cr.fill_preserve()
+
+        # Glass sheen: bright at the top, falling to a shaded bottom.
+        sheen = cairo.LinearGradient(0, y0, 0, y0 + ph)
+        sheen.add_color_stop_rgba(0.00, 1, 1, 1, 0.13)
+        sheen.add_color_stop_rgba(0.38, 1, 1, 1, 0.03)
+        sheen.add_color_stop_rgba(0.62, 1, 1, 1, 0.00)
+        sheen.add_color_stop_rgba(1.00, 0, 0, 0, 0.12)
+        cr.set_source(sheen)
+        cr.fill_preserve()
+
         cr.set_source_rgba(*BORDER)
         cr.set_line_width(1)
         cr.stroke_preserve()
-        cr.clip()  # bars can never escape the capsule
+        cr.clip()  # everything below stays inside the capsule
+
+        # Inner top highlight: a 1px rim that fades out by mid-height.
+        rounded_rect(cr, x0 + 1.5, y0 + 1.5, pw - 3, ph - 3, radius - 1.5)
+        rim = cairo.LinearGradient(0, y0, 0, y0 + ph * 0.55)
+        rim.add_color_stop_rgba(0, 1, 1, 1, 0.30)
+        rim.add_color_stop_rgba(1, 1, 1, 1, 0.00)
+        cr.set_source(rim)
+        cr.set_line_width(1)
+        cr.stroke()
+
+        # Specular blob: a soft off-center glow, the "liquid" touch.
+        spec = cairo.RadialGradient(
+            x0 + pw * 0.28, y0 + 2, 1, x0 + pw * 0.28, y0 + 2, ph * 0.95
+        )
+        spec.add_color_stop_rgba(0, 1, 1, 1, 0.10)
+        spec.add_color_stop_rgba(1, 1, 1, 1, 0.00)
+        cr.set_source(spec)
+        cr.paint()
 
         cr.set_line_width(3)
         cr.set_line_cap(cairo.LINE_CAP_ROUND)
@@ -165,7 +195,7 @@ class WaveView(Gtk.DrawingArea):
                 alpha = 0.55
             else:  # idle: random organic wave, regenerated each time
                 amp = self._idle_amps[i]
-                alpha = 0.40
+                alpha = 0.48
             # Taper the outermost bars into the rounded ends.
             edge = min(i, config.N_BARS - 1 - i)
             amp *= min(1.0, (edge + 1) / 4)
@@ -184,7 +214,7 @@ class WaveView(Gtk.DrawingArea):
             amp *= envelope[i]
             bh = max(1.5, amp * (ph / 2 - 7))
             x = x0 + 4 + step / 2 + i * step
-            cr.set_source_rgba(*config.BAR_COLOR, 0.50 * fade)
+            cr.set_source_rgba(*config.BAR_COLOR, 0.58 * fade)
             cr.move_to(x, cy - bh)
             cr.line_to(x, cy + bh)
             cr.stroke()
