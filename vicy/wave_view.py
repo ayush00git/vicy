@@ -45,9 +45,9 @@ class WaveView(Gtk.DrawingArea):
         ]
 
     def set_mini(self, mini):
+        """Switch drawing style only — the window animates the geometry."""
         if self.mini != mini:
             self.mini = mini
-            self.set_size_request(*(self.MINI_SIZE if mini else self.FULL_SIZE))
             self.queue_draw()
 
     def set_mode(self, mode):
@@ -73,14 +73,16 @@ class WaveView(Gtk.DrawingArea):
         cr.set_line_cap(cairo.LINE_CAP_ROUND)
 
         if self.mini:
-            # Collapsed idle orb: a few bars sampled from the idle wave.
+            # Collapsed idle orb: a tapered mini wave, not a barcode.
+            envelope = (0.45, 0.80, 1.0, 0.80, 0.45)
             step = w / self.MINI_BARS
             pick = max(1, config.N_BARS // self.MINI_BARS)
             for i in range(self.MINI_BARS):
                 amp = self._idle_amps[min(i * pick, config.N_BARS - 1)]
-                bh = max(1.5, amp * (cy - 4))
+                amp *= envelope[i]
+                bh = max(1.5, amp * (cy - 5))
                 x = step / 2 + i * step
-                cr.set_source_rgba(*config.BAR_COLOR, 0.40)
+                cr.set_source_rgba(*config.BAR_COLOR, 0.50)
                 cr.move_to(x, cy - bh)
                 cr.line_to(x, cy + bh)
                 cr.stroke()

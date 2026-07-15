@@ -97,7 +97,7 @@ class Vicy(Gtk.Window):
             screen, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
 
-        pill = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.pill = pill = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         pill.set_name("pill")
         pill.set_border_width(6)
         # Margins leave transparent room around the pill for its shadow.
@@ -123,17 +123,22 @@ class Vicy(Gtk.Window):
         self.connect("leave-notify-event", self._on_crossing, False)
         self.connect("destroy", Gtk.main_quit)
 
-        # Park near the top-center of the primary monitor.
+        # Load in the middle of the primary monitor.
         display = Gdk.Display.get_default()
         mon = display.get_primary_monitor() or display.get_monitor(0)
         geo = mon.get_geometry()
         self.show_all()
-        w, _ = self.get_size()
-        self.move(geo.x + (geo.width - w) // 2, geo.y + 48)
+        w, h = self.get_size()
+        self.move(geo.x + (geo.width - w) // 2, geo.y + (geo.height - h) // 2)
         self._update_shape()
 
     # The pill rests as a small circle while idle; hovering (or any
-    # recording/transcribing activity) expands it to the full wave.
+    # recording/transcribing activity) smoothly expands it to the full
+    # wave, keeping the widget centered around its middle.
+
+    # Window chrome around the wave: 2*border_width + 2*margin.
+    _WAVE_PAD = 36
+    _MORPH_SECONDS = 0.18
 
     def _on_crossing(self, _w, event, entered):
         if event.detail == Gdk.NotifyType.INFERIOR:
@@ -147,17 +152,37 @@ class Vicy(Gtk.Window):
         if mini == self._mini:
             return
         self._mini = mini
-        x, y = self.get_position()
-        w_before, _ = self.get_size()
         self.wave.set_mini(mini)
-        self.resize(1, 1)  # snap the window to the new preferred size
+        ctx = self.pill.get_style_context()
+        (ctx.add_class if mini else ctx.remove_class)("mini")
+        self._morph_to(WaveView.MINI_SIZE if mini else WaveView.FULL_SIZE)
 
-        def recenter():
-            w_after, _ = self.get_size()
-            self.move(x + (w_before - w_after) // 2, y)
-            return False
+    def _morph_to(self, target):
+        self._morph_gen = getattr(self, "_morph_gen", 0) + 1
+        gen = self._morph_gen
+        start_w = self.wave.get_allocated_width()
+        start_h = self.wave.get_allocated_height()
+        x, y = self.get_position()
+        w, h = self.get_size()
+        cx, cy = x + w / 2, y + h / 2
+        t0 = time.time()
 
-        GLib.timeout_add(30, recenter)
+        def step():
+            if gen != self._morph_gen:
+                return False
+            t = min(1.0, (time.time() - t0) / self._MORPH_SECONDS)
+            ease = 1 - (1 - t) ** 3  # ease-out cubic
+            cur_w = round(start_w + (target[0] - start_w) * ease)
+            cur_h = round(start_h + (target[1] - start_h) * ease)
+            self.wave.set_size_request(cur_w, cur_h)
+            self.resize(1, 1)
+            self.move(
+                round(cx - (cur_w + self._WAVE_PAD) / 2),
+                round(cy - (cur_h + self._WAVE_PAD) / 2),
+            )
+            return t < 1.0
+
+        GLib.timeout_add(16, step)  # ~60 fps
 
     # Click toggles recording; moving past a small threshold becomes a
     # drag. The window is moved manually (not via the window manager)
