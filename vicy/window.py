@@ -4,6 +4,8 @@ import atexit
 import threading
 import time
 
+import numpy as np
+
 import gi
 
 gi.require_version("Gtk", "3.0")
@@ -234,6 +236,11 @@ class Vicy(Gtk.Window):
         elif self.state == "recording":
             self._stop_recording()
 
+    def autostart_recording(self):
+        if self.state == "idle":
+            self._start_recording()
+        return False  # one-shot when scheduled via GLib.idle_add
+
     def _start_recording(self):
         try:
             self.recorder.start()
@@ -243,6 +250,8 @@ class Vicy(Gtk.Window):
 
         self.state = "recording"
         self.analyzer.reset()
+        self._last_voice = time.time()
+        self._noise_floor = None
         self.wave.set_mode("recording")
         self.revealer.set_reveal_child(False)
         self._set_status("")
@@ -257,12 +266,30 @@ class Vicy(Gtk.Window):
             samples = self.recorder.tail(config.FFT_SIZE)
             if samples is not None:
                 self.wave.set_bars(self.analyzer.update(samples))
+                if self._silence_elapsed(samples):
+                    self._stop_recording()
             return True
         if self.state == "transcribing":
             self.wave.tick()
             return True
         self._anim_id = None
         return False
+
+    def _silence_elapsed(self, samples):
+        """True once no voice has been heard for SILENCE_SECONDS.
+
+        The noise floor drops to any quieter frame instantly and creeps
+        up slowly, so it settles at the room's ambient level even if
+        recording starts mid-sentence."""
+        rms = float(np.sqrt(np.mean(samples**2)))
+        if self._noise_floor is None:
+            self._noise_floor = max(rms, 1e-4)
+        else:
+            self._noise_floor = min(self._noise_floor * 1.002, max(rms, 1e-4))
+        threshold = max(self._noise_floor * config.VOICE_RATIO, config.VOICE_MIN_RMS)
+        if rms > threshold:
+            self._last_voice = time.time()
+        return time.time() - self._last_voice > config.SILENCE_SECONDS
 
     def _stop_recording(self):
         self.state = "transcribing"
@@ -324,8 +351,12 @@ class Vicy(Gtk.Window):
         return False
 
 
-def run():
-    """Start the app, or just raise the already-running instance."""
+def run(autostart: bool = False):
+    """Start the app, or just raise the already-running instance.
+
+    With autostart=True (hotkey pressed while Vicy wasn't running),
+    recording begins as soon as the window is up — the mic doesn't
+    need to wait for the model."""
     try:
         send_command("show")
         print("Vicy is already running — brought to front.")
@@ -337,4 +368,6 @@ def run():
     atexit.register(IpcServer.cleanup)
     GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, 2, Gtk.main_quit)  # SIGINT
     app.present()
+    if autostart:
+        GLib.idle_add(app.autostart_recording)
     Gtk.main()

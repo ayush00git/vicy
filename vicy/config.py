@@ -25,6 +25,13 @@ MIN_SECONDS = 0.3    # discard captures shorter than this
 FFT_SIZE = 1024      # ~64 ms of audio per spectrum frame
 BAND_LO, BAND_HI = 80.0, 4000.0  # voice range mapped across the bars
 
+# Silence auto-stop: recording ends after this long without voice.
+# Voice = frame RMS above max(noise_floor * VOICE_RATIO, VOICE_MIN_RMS),
+# where the noise floor adapts (drops fast in quiet, creeps up slowly).
+SILENCE_SECONDS = 2.0
+VOICE_RATIO = 2.0
+VOICE_MIN_RMS = 0.02
+
 # UI
 N_BARS = 36
 FPS_MS = 33          # ~30 fps animation while active

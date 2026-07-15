@@ -9,10 +9,12 @@ A tiny floating voice-to-text widget for Linux, powered by OpenAI Whisper
 ./run.sh
 ```
 
-- **Click the wave pill** to record, click again to stop — or press the
-  global hotkey **Ctrl+M** from anywhere (works even when Vicy isn't focused;
-  launches Vicy if it isn't running). While recording, the bars dance with
-  your voice's frequency spectrum.
+- **Press Ctrl+M** from anywhere and just talk. If Vicy isn't running it
+  wakes up and starts recording immediately; when you stop speaking for
+  ~2 seconds the recording ends and transcribes itself. Clicking the wave
+  pill does the same (click again to stop early). While recording, the
+  bars dance with your voice's frequency spectrum.
+  Silence timing lives in `vicy/config.py` (`SILENCE_SECONDS`, `VOICE_RATIO`).
 - The transcript slides out below the pill and is **copied to your clipboard**.
 - **Drag** the pill anywhere on screen (a click with motion becomes a drag).
 - **Right-click** to switch Whisper models (tiny/base/small/medium), copy the

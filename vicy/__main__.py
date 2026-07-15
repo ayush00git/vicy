@@ -19,7 +19,11 @@ def main():
                 print(send_command("toggle"))
                 return
             except OSError:
-                pass  # not running — fall through and start the app instead
+                # Not running — wake up and go straight into recording.
+                from .window import run
+
+                run(autostart=True)
+                return
         elif arg == "--status":
             try:
                 print(send_command("status"))
