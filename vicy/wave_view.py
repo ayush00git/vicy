@@ -55,7 +55,15 @@ class WaveView(Gtk.DrawingArea):
         self.morph = 1.0  # start collapsed
         self._morph_target = 1.0
         self._morph_gen = 0
+        self._ambient_on = False
+        self.ambient_phase = 0.0
         self._idle_amps = self._random_idle_pattern()
+        self._idle_offsets = [
+            random.uniform(0, math.tau) for _ in range(config.N_BARS)
+        ]
+        self._idle_speeds = [
+            random.uniform(0.7, 1.4) for _ in range(config.N_BARS)
+        ]
         self.set_size_request(*WINDOW_SIZE)
         self.connect("draw", self._draw)
 
@@ -77,6 +85,7 @@ class WaveView(Gtk.DrawingArea):
             self.bars = np.zeros(config.N_BARS)
         if mode == "idle":
             self._idle_amps = self._random_idle_pattern()
+            self._ensure_ambient()
         self.queue_draw()
 
     def set_bars(self, vals):
@@ -90,10 +99,8 @@ class WaveView(Gtk.DrawingArea):
     # ---------- morph animation ----------
 
     @staticmethod
-    def _ease_out_back(t, s=1.3):
-        """Overshoots the target slightly, then settles — the 'pop'."""
-        t -= 1.0
-        return 1.0 + t * t * ((s + 1.0) * t + s)
+    def _ease_out_cubic(t):
+        return 1 - (1 - t) ** 3
 
     @staticmethod
     def _ease_in_out_cubic(t):
@@ -104,8 +111,8 @@ class WaveView(Gtk.DrawingArea):
 
         Runs on the frame clock (vsync-aligned, one step per rendered
         frame — GLib timeouts drift against the compositor and stutter).
-        Expanding uses ease-out-back for a small overshoot pop;
-        collapsing uses a calmer ease-in-out."""
+        Expanding uses ease-out, collapsing a calmer ease-in-out; the
+        liveliness comes from the ambient wave motion, not overshoot."""
         if target == self._morph_target:
             return
         self._morph_target = target
@@ -113,8 +120,8 @@ class WaveView(Gtk.DrawingArea):
         gen = self._morph_gen
         start = self.morph
         expanding = target < start
-        ease = self._ease_out_back if expanding else self._ease_in_out_cubic
-        duration = (0.30 if expanding else 0.35) * 1e6  # frame time is µs
+        ease = self._ease_out_cubic if expanding else self._ease_in_out_cubic
+        duration = (0.28 if expanding else 0.34) * 1e6  # frame time is µs
         state = {}
 
         def tick(_widget, clock):
@@ -125,7 +132,35 @@ class WaveView(Gtk.DrawingArea):
             t = min(1.0, (now - t0) / duration)
             self.morph = start + (target - start) * ease(t)
             self.queue_draw()
-            return GLib.SOURCE_CONTINUE if t < 1.0 else GLib.SOURCE_REMOVE
+            if t >= 1.0:
+                self._ensure_ambient()
+                return GLib.SOURCE_REMOVE
+            return GLib.SOURCE_CONTINUE
+
+        self.add_tick_callback(tick)
+
+    # ---------- ambient idle motion ----------
+
+    def _ambient_active(self):
+        """Gentle wave motion runs while the pill is expanded and idle."""
+        return self.mode == "idle" and self.morph < 0.6
+
+    def _ensure_ambient(self):
+        if self._ambient_on or not self._ambient_active():
+            return
+        self._ambient_on = True
+        state = {}
+
+        def tick(_widget, clock):
+            now = clock.get_frame_time()
+            last = state.get("last", now)
+            state["last"] = now
+            if not self._ambient_active():
+                self._ambient_on = False
+                return GLib.SOURCE_REMOVE
+            self.ambient_phase += (now - last) / 1e6 * 2.0  # rad/s
+            self.queue_draw()
+            return GLib.SOURCE_CONTINUE
 
         self.add_tick_callback(tick)
 
@@ -215,8 +250,12 @@ class WaveView(Gtk.DrawingArea):
             elif self.mode == "busy":
                 amp = 0.25 + 0.20 * math.sin(self.phase - i * 0.55)
                 alpha = 0.55
-            else:  # idle: random organic wave, regenerated each time
-                amp = self._idle_amps[i]
+            else:  # idle: organic wave, each bar breathing at its own pace
+                wob = 0.82 + 0.18 * math.sin(
+                    self.ambient_phase * self._idle_speeds[i]
+                    + self._idle_offsets[i]
+                )
+                amp = self._idle_amps[i] * wob
                 alpha = 0.48
             # Taper the outermost bars into the rounded ends.
             edge = min(i, config.N_BARS - 1 - i)
