@@ -9,11 +9,15 @@ A tiny floating voice-to-text widget for Linux, powered by OpenAI Whisper
 ./run.sh
 ```
 
-- **Click the mic** 🎤 to record, click again ⏹ to stop.
+- **Click the wave pill** to record, click again to stop — or press the
+  global hotkey **Ctrl+M** from anywhere (works even when Vicy isn't focused;
+  launches Vicy if it isn't running). While recording, the bars dance with
+  your voice's frequency spectrum.
 - The transcript slides out below the pill and is **copied to your clipboard**.
-- **Drag** the pill anywhere on screen.
+- **Drag** the pill anywhere on screen (a click with motion becomes a drag).
 - **Right-click** to switch Whisper models (tiny/base/small/medium), copy the
   last transcript, or quit. `Esc` hides the transcript panel.
+- Every capture is saved to `~/.cache/vicy/last.wav` for debugging.
 - Default model is `base`; override with `VICY_MODEL=small ./run.sh`.
   Models download once to `~/.cache/huggingface/` on first use.
 
@@ -27,3 +31,17 @@ python3 -m venv --system-site-packages .venv   # system site: reuses Fedora's GT
 Needs Fedora's `python3-gobject` + GTK3 (preinstalled on Workstation) and
 `portaudio` (present). Runs via XWayland (`GDK_BACKEND=x11`) so the
 always-on-top hint works under GNOME Wayland.
+
+## Global hotkey
+
+Wayland apps can't grab global keys themselves, so Vicy registers a GNOME
+custom shortcut that pokes the running instance over a unix socket
+(`$XDG_RUNTIME_DIR/vicy.sock`):
+
+```bash
+./run.sh --install-hotkey              # binds Ctrl+M (default)
+./run.sh --install-hotkey '<Super>m'   # or any GTK accelerator string
+```
+
+CLI verbs: `--toggle` (start/stop recording), `--status`, `--install-hotkey`.
+Running `./run.sh` again while Vicy is open just raises the existing window.
