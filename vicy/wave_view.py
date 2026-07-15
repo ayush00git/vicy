@@ -32,8 +32,15 @@ BORDER = (1.0, 1.0, 1.0, 0.16)
 # Springs (omega = stiffness rad/s, zeta = damping ratio). The morph is
 # lightly underdamped for a tiny natural overshoot; the opacity
 # crossfade is critically damped and softer, so it lags the geometry.
-MORPH_OMEGA, MORPH_ZETA = 26.0, 0.88
-FADE_OMEGA, FADE_ZETA = 18.0, 1.0
+# Asymmetric springs: expanding answers the user's intent, so it's
+# snappy; collapsing happens on the widget's own time, so it recedes
+# softly (Gemini's gentler constants). Fade springs stay ~70% of the
+# geometry spring so opacity lags the shape in both directions.
+EXPAND_OMEGA, EXPAND_ZETA = 24.0, 0.88
+COLLAPSE_OMEGA, COLLAPSE_ZETA = 14.14, 0.95
+EXPAND_FADE_OMEGA = 17.0
+COLLAPSE_FADE_OMEGA = 10.0
+FADE_ZETA = 1.0
 
 MASTER_SPEED = 2.0   # rad/s — the one shared timing source
 ATTACK_TAU = 0.035   # bars rise fast…
@@ -76,6 +83,8 @@ class WaveView(Gtk.DrawingArea):
         self._fade = 1.0
         self._fade_target = 1.0
         self._fade_vel = 0.0
+        self._omega, self._zeta = COLLAPSE_OMEGA, COLLAPSE_ZETA
+        self._fade_omega = COLLAPSE_FADE_OMEGA
 
         # Shared timing source for ambient wobble, breathing, glow.
         self.master_phase = 0.0
@@ -140,9 +149,17 @@ class WaveView(Gtk.DrawingArea):
         self._ensure_anim()
 
     def morph_to(self, target: float):
-        """Retarget the springs toward 0.0 (pill) or 1.0 (orb)."""
+        """Retarget the springs toward 0.0 (pill) or 1.0 (orb).
+        Momentum carries over; only the spring constants swap by
+        direction (snappy out, soft home)."""
         if target == self._morph_target:
             return
+        expanding = target < 0.5
+        self._omega = EXPAND_OMEGA if expanding else COLLAPSE_OMEGA
+        self._zeta = EXPAND_ZETA if expanding else COLLAPSE_ZETA
+        self._fade_omega = (
+            EXPAND_FADE_OMEGA if expanding else COLLAPSE_FADE_OMEGA
+        )
         self._morph_target = float(target)
         self._fade_target = float(target)
         self._ensure_anim()
@@ -191,7 +208,7 @@ class WaveView(Gtk.DrawingArea):
         # Springs: geometry, then the softer opacity crossfade.
         self.morph, self._morph_vel = self._spring(
             self.morph, self._morph_vel, self._morph_target,
-            MORPH_OMEGA, MORPH_ZETA, dt,
+            self._omega, self._zeta, dt,
         )
         if (
             abs(self.morph - self._morph_target) < 1e-3
@@ -200,7 +217,7 @@ class WaveView(Gtk.DrawingArea):
             self.morph, self._morph_vel = self._morph_target, 0.0
         self._fade, self._fade_vel = self._spring(
             self._fade, self._fade_vel, self._fade_target,
-            FADE_OMEGA, FADE_ZETA, dt,
+            self._fade_omega, FADE_ZETA, dt,
         )
         if (
             abs(self._fade - self._fade_target) < 1e-3

@@ -13,13 +13,15 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, GLib, Gtk
 
+import cairo
+
 from . import config
 from .audio import Recorder, SpectrumAnalyzer
 from .clipboard import copy_to_clipboard
 from .ipc import IpcServer, send_command
 from .transcriber import Transcriber
 from .typer import Typer
-from .wave_view import WaveView
+from .wave_view import ORB, PILL_SIZE, WaveView
 
 
 def notify(summary, body=""):
@@ -126,6 +128,22 @@ class Vicy(Gtk.Window):
         self.show_all()
         w, _h = self.get_size()
         self.move(geo.x + (geo.width - w) // 2, geo.y + 36)
+        self._sync_input_shape(orb_only=True)  # starts collapsed
+
+    def _sync_input_shape(self, orb_only):
+        """Restrict the window's input region to the visible shape so
+        clicks on the transparent margin pass through to whatever is
+        behind the widget (links, buttons, other windows)."""
+        gdk_win = self.get_window()
+        if gdk_win is None:
+            return
+        w, h = self.get_size()
+        pw, ph = (ORB, ORB) if orb_only else PILL_SIZE
+        pw, ph = pw + 4, ph + 4  # small pad so hover pickup isn't fiddly
+        rect = cairo.RectangleInt(
+            int((w - pw) / 2), int((h - ph) / 2), int(pw), int(ph)
+        )
+        gdk_win.input_shape_combine_region(cairo.Region(rect), 0, 0)
 
     # The pill rests as a small orb while idle; hovering it (or any
     # recording/transcribing activity) expands it. After the pointer
@@ -169,6 +187,7 @@ class Vicy(Gtk.Window):
             if self._collapse_id is not None:
                 GLib.source_remove(self._collapse_id)
                 self._collapse_id = None
+            self._sync_input_shape(orb_only=False)
             self.wave.morph_to(0.0)
             return
         if self._collapse_id is None:
@@ -177,6 +196,7 @@ class Vicy(Gtk.Window):
                 self._collapse_id = None
                 if self.state == "idle" and not self._hovered:
                     self.wave.morph_to(1.0)
+                    self._sync_input_shape(orb_only=True)
                 return False
 
             self._collapse_id = GLib.timeout_add(
