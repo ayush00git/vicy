@@ -40,6 +40,8 @@ class Vicy(Gtk.Window):
         self._press_pos = None
         self._win_pos = (0, 0)
         self._dragging = False
+        self._hovered = False
+        self._mini = False
 
         self.recorder = Recorder()
         self.analyzer = SpectrumAnalyzer()
@@ -111,10 +113,14 @@ class Vicy(Gtk.Window):
             Gdk.EventMask.BUTTON_PRESS_MASK
             | Gdk.EventMask.BUTTON_RELEASE_MASK
             | Gdk.EventMask.POINTER_MOTION_MASK
+            | Gdk.EventMask.ENTER_NOTIFY_MASK
+            | Gdk.EventMask.LEAVE_NOTIFY_MASK
         )
         self.connect("button-press-event", self._on_press)
         self.connect("button-release-event", self._on_release)
         self.connect("motion-notify-event", self._on_motion)
+        self.connect("enter-notify-event", self._on_crossing, True)
+        self.connect("leave-notify-event", self._on_crossing, False)
         self.connect("destroy", Gtk.main_quit)
 
         # Park near the top-center of the primary monitor.
@@ -124,6 +130,34 @@ class Vicy(Gtk.Window):
         self.show_all()
         w, _ = self.get_size()
         self.move(geo.x + (geo.width - w) // 2, geo.y + 48)
+        self._update_shape()
+
+    # The pill rests as a small circle while idle; hovering (or any
+    # recording/transcribing activity) expands it to the full wave.
+
+    def _on_crossing(self, _w, event, entered):
+        if event.detail == Gdk.NotifyType.INFERIOR:
+            return False  # pointer moved between the window and a child
+        self._hovered = entered
+        self._update_shape()
+        return False
+
+    def _update_shape(self):
+        mini = self.state == "idle" and not self._hovered
+        if mini == self._mini:
+            return
+        self._mini = mini
+        x, y = self.get_position()
+        w_before, _ = self.get_size()
+        self.wave.set_mini(mini)
+        self.resize(1, 1)  # snap the window to the new preferred size
+
+        def recenter():
+            w_after, _ = self.get_size()
+            self.move(x + (w_before - w_after) // 2, y)
+            return False
+
+        GLib.timeout_add(30, recenter)
 
     # Click toggles recording; moving past a small threshold becomes a
     # drag. The window is moved manually (not via the window manager)
@@ -223,6 +257,7 @@ class Vicy(Gtk.Window):
         self._last_voice = time.time()
         self._noise_floor = None
         self.wave.set_mode("recording")
+        self._update_shape()
         self._start_anim()
 
     def _start_anim(self):
@@ -286,6 +321,7 @@ class Vicy(Gtk.Window):
     def _reset_idle(self):
         self.state = "idle"
         self.wave.set_mode("idle")
+        self._update_shape()
         return False
 
     def _finish(self, text, peak=0.0):

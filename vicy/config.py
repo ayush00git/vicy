@@ -45,7 +45,7 @@ CSS = b"""
 #vicywin { background: transparent; }
 #pill {
     background: rgba(8, 8, 10, 0.97);
-    border-radius: 24px;
+    border-radius: 999px; /* capsule when wide, circle when collapsed */
     border: 1px solid rgba(255, 255, 255, 0.10);
     box-shadow: 0 2px 14px rgba(0, 0, 0, 0.35);
 }
