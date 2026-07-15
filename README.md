@@ -21,6 +21,21 @@ A tiny floating voice-to-text widget for Linux, powered by OpenAI Whisper
 - Default model is `base`; override with `VICY_MODEL=small ./run.sh`.
   Models download once to `~/.cache/huggingface/` on first use.
 
+## Code layout
+
+```
+vicy/
+  __main__.py    CLI entry (--toggle/--status stay stdlib-light for the hotkey)
+  config.py      constants, paths, palette, CSS; forces the X11 backend
+  window.py      the pill window: UI, state machine, wiring
+  wave_view.py   the frequency-bar widget (Cairo)
+  audio.py       Recorder (mic stream) + SpectrumAnalyzer (FFT bands)
+  transcriber.py faster-whisper lifecycle + transcription (GTK-free)
+  ipc.py         unix-socket client/server for the global hotkey
+  hotkey.py      GNOME custom-shortcut registration
+  clipboard.py   wl-copy with GTK fallback
+```
+
 ## Setup (already done)
 
 ```bash
