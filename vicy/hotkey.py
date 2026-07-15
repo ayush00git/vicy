@@ -6,8 +6,15 @@ running instance over the IPC socket.
 """
 
 import os
+import sys
 
 from .config import APP_DIR
+
+
+def _toggle_command() -> str:
+    if getattr(sys, "frozen", False):  # PyInstaller binary
+        return f"{sys.executable} --toggle"
+    return os.path.join(APP_DIR, "run.sh") + " --toggle"
 
 
 def install_hotkey(binding: str) -> None:
@@ -23,7 +30,7 @@ def install_hotkey(binding: str) -> None:
         settings.set_strv("custom-keybindings", paths)
     kb = Gio.Settings.new_with_path(f"{base}.custom-keybinding", path)
     kb.set_string("name", "Vicy: toggle recording")
-    kb.set_string("command", os.path.join(APP_DIR, "run.sh") + " --toggle")
+    kb.set_string("command", _toggle_command())
     kb.set_string("binding", binding)
     Gio.Settings.sync()
     print(f"Registered GNOME shortcut: {binding} → toggle Vicy recording")
