@@ -38,6 +38,8 @@ class Vicy(Gtk.Window):
         self.last_text = ""
         self._anim_id = None
         self._press_pos = None
+        self._win_pos = (0, 0)
+        self._dragging = False
 
         self.recorder = Recorder()
         self.analyzer = SpectrumAnalyzer()
@@ -73,8 +75,12 @@ class Vicy(Gtk.Window):
         self.set_skip_pager_hint(True)
         self.set_keep_above(True)
         # Never take keyboard focus: the user's cursor must stay in the
-        # app they're dictating into, or the auto-paste lands nowhere.
+        # app they're dictating into, or the injected text lands nowhere.
+        # DOCK makes the window panel-class, so Mutter also skips it when
+        # picking a default window to focus on workspace switches.
         self.set_accept_focus(False)
+        self.set_focus_on_map(False)
+        self.set_type_hint(Gdk.WindowTypeHint.DOCK)
         self.stick()
         self.set_app_paintable(True)
 
@@ -116,11 +122,15 @@ class Vicy(Gtk.Window):
         w, _ = self.get_size()
         self.move(geo.x + (geo.width - w) // 2, geo.y + 48)
 
-    # Click toggles recording; moving past a small threshold becomes a drag.
+    # Click toggles recording; moving past a small threshold becomes a
+    # drag. The window is moved manually (not via the window manager)
+    # because WMs refuse interactive moves for DOCK windows.
 
     def _on_press(self, _w, event):
         if event.button == 1:
             self._press_pos = (event.x_root, event.y_root)
+            self._win_pos = self.get_position()
+            self._dragging = False
             return True
         if event.button == 3:
             self._popup_menu(event)
@@ -128,20 +138,22 @@ class Vicy(Gtk.Window):
         return False
 
     def _on_motion(self, _w, event):
-        if self._press_pos is not None:
-            dx = event.x_root - self._press_pos[0]
-            dy = event.y_root - self._press_pos[1]
-            if abs(dx) > config.DRAG_THRESHOLD or abs(dy) > config.DRAG_THRESHOLD:
-                self._press_pos = None
-                self.begin_move_drag(
-                    1, int(event.x_root), int(event.y_root), event.time
-                )
-        return False
+        if self._press_pos is None:
+            return False
+        dx = event.x_root - self._press_pos[0]
+        dy = event.y_root - self._press_pos[1]
+        if self._dragging or abs(dx) > config.DRAG_THRESHOLD or abs(dy) > config.DRAG_THRESHOLD:
+            self._dragging = True
+            self.move(int(self._win_pos[0] + dx), int(self._win_pos[1] + dy))
+        return True
 
     def _on_release(self, _w, event):
         if event.button == 1 and self._press_pos is not None:
+            was_click = not self._dragging
             self._press_pos = None
-            self._on_toggle()
+            self._dragging = False
+            if was_click:
+                self._on_toggle()
             return True
         return False
 
