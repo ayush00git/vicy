@@ -118,13 +118,13 @@ class Vicy(Gtk.Window):
         self.connect("leave-notify-event", self._on_crossing, False)
         self.connect("destroy", Gtk.main_quit)
 
-        # Load in the middle of the primary monitor.
+        # Load at the top-middle of the primary monitor.
         display = Gdk.Display.get_default()
         mon = display.get_primary_monitor() or display.get_monitor(0)
         geo = mon.get_geometry()
         self.show_all()
-        w, h = self.get_size()
-        self.move(geo.x + (geo.width - w) // 2, geo.y + (geo.height - h) // 2)
+        w, _h = self.get_size()
+        self.move(geo.x + (geo.width - w) // 2, geo.y + 36)
 
     # The pill rests as a small orb while idle; hovering it (or any
     # recording/transcribing activity) expands it. After the pointer

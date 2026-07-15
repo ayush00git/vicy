@@ -8,7 +8,6 @@ janky).
 
 import math
 import random
-import time
 
 import gi
 
@@ -23,7 +22,6 @@ from . import config
 WINDOW_SIZE = (216, 84)  # fixed window, includes room for the shadow
 PILL_SIZE = (192, 60)    # expanded capsule
 ORB = 48                 # collapsed circle diameter
-MORPH_SECONDS = 0.22
 
 # Liquid-glass body: translucent smoky base; the glass optics (sheen,
 # highlight, specular) are painted as gradient layers on top.
@@ -91,26 +89,45 @@ class WaveView(Gtk.DrawingArea):
 
     # ---------- morph animation ----------
 
+    @staticmethod
+    def _ease_out_back(t, s=1.3):
+        """Overshoots the target slightly, then settles — the 'pop'."""
+        t -= 1.0
+        return 1.0 + t * t * ((s + 1.0) * t + s)
+
+    @staticmethod
+    def _ease_in_out_cubic(t):
+        return 4 * t * t * t if t < 0.5 else 1 - (-2 * t + 2) ** 3 / 2
+
     def morph_to(self, target: float):
-        """Animate toward 0.0 (pill) or 1.0 (orb) with ease-out cubic."""
+        """Animate toward 0.0 (pill) or 1.0 (orb).
+
+        Runs on the frame clock (vsync-aligned, one step per rendered
+        frame — GLib timeouts drift against the compositor and stutter).
+        Expanding uses ease-out-back for a small overshoot pop;
+        collapsing uses a calmer ease-in-out."""
         if target == self._morph_target:
             return
         self._morph_target = target
         self._morph_gen += 1
         gen = self._morph_gen
         start = self.morph
-        t0 = time.time()
+        expanding = target < start
+        ease = self._ease_out_back if expanding else self._ease_in_out_cubic
+        duration = (0.30 if expanding else 0.35) * 1e6  # frame time is µs
+        state = {}
 
-        def step():
+        def tick(_widget, clock):
             if gen != self._morph_gen:
-                return False
-            t = min(1.0, (time.time() - t0) / MORPH_SECONDS)
-            ease = 1 - (1 - t) ** 3
-            self.morph = start + (target - start) * ease
+                return GLib.SOURCE_REMOVE
+            now = clock.get_frame_time()
+            t0 = state.setdefault("t0", now)
+            t = min(1.0, (now - t0) / duration)
+            self.morph = start + (target - start) * ease(t)
             self.queue_draw()
-            return t < 1.0
+            return GLib.SOURCE_CONTINUE if t < 1.0 else GLib.SOURCE_REMOVE
 
-        GLib.timeout_add(16, step)  # ~60 fps
+        self.add_tick_callback(tick)
 
     def pill_rect(self):
         """Current visual bounds (x, y, w, h) inside the fixed window."""
@@ -174,9 +191,14 @@ class WaveView(Gtk.DrawingArea):
         cr.set_line_width(3)
         cr.set_line_cap(cairo.LINE_CAP_ROUND)
 
-        # Crossfade between the full wave and the orb's 5-bar snippet.
-        full_alpha = max(0.0, 1.0 - self.morph * 1.8)
-        mini_alpha = max(0.0, (self.morph - 0.45) / 0.55)
+        # Crossfade between the full wave and the orb's 5-bar snippet
+        # (smoothstep, so neither side pops in or out).
+        def smoothstep(e0, e1, x):
+            t = min(1.0, max(0.0, (x - e0) / (e1 - e0)))
+            return t * t * (3 - 2 * t)
+
+        full_alpha = 1.0 - smoothstep(0.15, 0.55, self.morph)
+        mini_alpha = smoothstep(0.50, 0.90, self.morph)
         if full_alpha > 0:
             self._draw_full(cr, x0, cy, pw, ph, full_alpha)
         if mini_alpha > 0:
