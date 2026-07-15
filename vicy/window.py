@@ -41,7 +41,7 @@ class Vicy(Gtk.Window):
         self._win_pos = (0, 0)
         self._dragging = False
         self._hovered = False
-        self._mini = False
+        self._collapse_id = None
 
         self.recorder = Recorder()
         self.analyzer = SpectrumAnalyzer()
@@ -97,17 +97,12 @@ class Vicy(Gtk.Window):
             screen, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
 
-        self.pill = pill = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        pill.set_name("pill")
-        pill.set_border_width(6)
-        # Margins leave transparent room around the pill for its shadow.
-        for side in ("top", "bottom", "start", "end"):
-            getattr(pill, f"set_margin_{side}")(12)
-        self.add(pill)
-
+        # The wave view draws the whole pill (background, shadow, bars)
+        # into a fixed-size transparent window, so shape morphs never
+        # touch the window manager.
         self.wave = WaveView()
         self.wave.set_tooltip_text("Click or Ctrl+M: record · drag to move")
-        pill.pack_start(self.wave, True, True, 0)
+        self.add(self.wave)
 
         self.add_events(
             Gdk.EventMask.BUTTON_PRESS_MASK
@@ -130,65 +125,55 @@ class Vicy(Gtk.Window):
         self.show_all()
         w, h = self.get_size()
         self.move(geo.x + (geo.width - w) // 2, geo.y + (geo.height - h) // 2)
-        self._update_shape()
 
-    # The pill rests as a small circle while idle; hovering (or any
-    # recording/transcribing activity) smoothly expands it to the full
-    # wave, keeping the widget centered around its middle.
+    # The pill rests as a small orb while idle; hovering it (or any
+    # recording/transcribing activity) expands it. After the pointer
+    # leaves, it lingers for COLLAPSE_DELAY_MS before collapsing.
 
-    # Window chrome around the wave: 2*border_width + 2*margin.
-    _WAVE_PAD = 36
-    _MORPH_SECONDS = 0.18
+    COLLAPSE_DELAY_MS = 2000
+
+    def _in_pill(self, event):
+        x0, y0, pw, ph = self.wave.pill_rect()
+        return x0 <= event.x <= x0 + pw and y0 <= event.y <= y0 + ph
+
+    def _set_hovered(self, hovered):
+        if hovered != self._hovered:
+            self._hovered = hovered
+            self._refresh_shape()
 
     def _on_crossing(self, _w, event, entered):
         if event.detail == Gdk.NotifyType.INFERIOR:
             return False  # pointer moved between the window and a child
-        self._hovered = entered
-        self._update_shape()
+        self._set_hovered(entered and self._in_pill(event))
         return False
 
-    def _update_shape(self):
-        mini = self.state == "idle" and not self._hovered
-        if mini == self._mini:
+    def _refresh_shape(self):
+        want_orb = self.state == "idle" and not self._hovered
+        if not want_orb:
+            if self._collapse_id is not None:
+                GLib.source_remove(self._collapse_id)
+                self._collapse_id = None
+            self.wave.morph_to(0.0)
             return
-        self._mini = mini
-        self.wave.set_mini(mini)
-        ctx = self.pill.get_style_context()
-        (ctx.add_class if mini else ctx.remove_class)("mini")
-        self._morph_to(WaveView.MINI_SIZE if mini else WaveView.FULL_SIZE)
+        if self._collapse_id is None:
 
-    def _morph_to(self, target):
-        self._morph_gen = getattr(self, "_morph_gen", 0) + 1
-        gen = self._morph_gen
-        start_w = self.wave.get_allocated_width()
-        start_h = self.wave.get_allocated_height()
-        x, y = self.get_position()
-        w, h = self.get_size()
-        cx, cy = x + w / 2, y + h / 2
-        t0 = time.time()
-
-        def step():
-            if gen != self._morph_gen:
+            def collapse():
+                self._collapse_id = None
+                if self.state == "idle" and not self._hovered:
+                    self.wave.morph_to(1.0)
                 return False
-            t = min(1.0, (time.time() - t0) / self._MORPH_SECONDS)
-            ease = 1 - (1 - t) ** 3  # ease-out cubic
-            cur_w = round(start_w + (target[0] - start_w) * ease)
-            cur_h = round(start_h + (target[1] - start_h) * ease)
-            self.wave.set_size_request(cur_w, cur_h)
-            self.resize(1, 1)
-            self.move(
-                round(cx - (cur_w + self._WAVE_PAD) / 2),
-                round(cy - (cur_h + self._WAVE_PAD) / 2),
-            )
-            return t < 1.0
 
-        GLib.timeout_add(16, step)  # ~60 fps
+            self._collapse_id = GLib.timeout_add(
+                self.COLLAPSE_DELAY_MS, collapse
+            )
 
     # Click toggles recording; moving past a small threshold becomes a
     # drag. The window is moved manually (not via the window manager)
     # because WMs refuse interactive moves for DOCK windows.
 
     def _on_press(self, _w, event):
+        if not self._in_pill(event):
+            return False  # ignore clicks on the transparent shadow area
         if event.button == 1:
             self._press_pos = (event.x_root, event.y_root)
             self._win_pos = self.get_position()
@@ -201,6 +186,7 @@ class Vicy(Gtk.Window):
 
     def _on_motion(self, _w, event):
         if self._press_pos is None:
+            self._set_hovered(self._in_pill(event))
             return False
         dx = event.x_root - self._press_pos[0]
         dy = event.y_root - self._press_pos[1]
@@ -282,7 +268,7 @@ class Vicy(Gtk.Window):
         self._last_voice = time.time()
         self._noise_floor = None
         self.wave.set_mode("recording")
-        self._update_shape()
+        self._refresh_shape()
         self._start_anim()
 
     def _start_anim(self):
@@ -346,7 +332,7 @@ class Vicy(Gtk.Window):
     def _reset_idle(self):
         self.state = "idle"
         self.wave.set_mode("idle")
-        self._update_shape()
+        self._refresh_shape()
         return False
 
     def _finish(self, text, peak=0.0):

@@ -41,15 +41,8 @@ DRAG_THRESHOLD = 6   # px of motion before a click becomes a window drag
 # grey shades coming from alpha over the black background.
 BAR_COLOR = (1.0, 1.0, 1.0)
 
+# The pill body (background, border, shadow) is drawn in Cairo by
+# WaveView; the window itself just needs to be transparent.
 CSS = b"""
 #vicywin { background: transparent; }
-#pill {
-    background: rgba(8, 8, 10, 0.97);
-    border-radius: 30px; /* half the full pill height: capsule */
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    box-shadow: 0 2px 14px rgba(0, 0, 0, 0.35);
-}
-#pill.mini {
-    border-radius: 24px; /* half the collapsed box: circle */
-}
 """
