@@ -97,9 +97,9 @@ FFT_SIZE = 1024      # ~64 ms of audio per spectrum frame
 BAND_LO, BAND_HI = 80.0, 4000.0  # voice range mapped across the bars
 DRAG_THRESHOLD = 6   # px of motion before a click becomes a window drag
 
-# Palette (r, g, b in 0..1)
-ACCENT = (0.55, 0.49, 1.00)   # violet
-ACCENT2 = (0.31, 0.80, 0.77)  # teal
+# Monochrome palette: the pill is near-black, bars are white with the
+# grey shades coming from alpha over the dark background.
+BAR_COLOR = (1.0, 1.0, 1.0)
 
 CSS = b"""
 #vicywin { background: transparent; }
@@ -128,10 +128,6 @@ def copy_to_clipboard(text: str) -> bool:
             return False
 
 
-def lerp_color(a, b, t):
-    return tuple(a[i] + (b[i] - a[i]) * t for i in range(3))
-
-
 class WaveView(Gtk.DrawingArea):
     """The pill's only face: a row of frequency bars.
 
@@ -147,7 +143,7 @@ class WaveView(Gtk.DrawingArea):
         self.mode = "idle"  # idle | recording | busy
         self.bars = np.zeros(self.N_BARS)
         self.phase = 0.0
-        self.set_size_request(230, 40)
+        self.set_size_request(180, 48)
         self.connect("draw", self._draw)
 
     def set_mode(self, mode):
@@ -173,19 +169,18 @@ class WaveView(Gtk.DrawingArea):
 
         for i in range(self.N_BARS):
             x = step / 2 + i * step
-            t = i / (self.N_BARS - 1)
             if self.mode == "recording":
                 v = float(self.bars[i])
                 amp = 0.08 + 0.88 * v
-                alpha = 0.45 + 0.55 * v
+                alpha = 0.30 + 0.70 * v  # grey at rest, white on voice
             elif self.mode == "busy":
                 amp = 0.25 + 0.20 * math.sin(self.phase - i * 0.55)
-                alpha = 0.75
+                alpha = 0.55
             else:  # idle: gentle frozen wave
                 amp = 0.10 + 0.06 * math.sin(i * 0.7)
-                alpha = 0.35
+                alpha = 0.28
             bh = max(1.5, amp * (cy - 4))
-            cr.set_source_rgba(*lerp_color(ACCENT, ACCENT2, t), alpha)
+            cr.set_source_rgba(*BAR_COLOR, alpha)
             cr.move_to(x, cy - bh)
             cr.line_to(x, cy + bh)
             cr.stroke()
@@ -300,7 +295,7 @@ class Vicy(Gtk.Window):
         self.transcript = Gtk.Label(label="")
         self.transcript.set_name("transcript")
         self.transcript.set_line_wrap(True)
-        self.transcript.set_max_width_chars(36)
+        self.transcript.set_max_width_chars(26)
         self.transcript.set_selectable(True)
         self.transcript.set_xalign(0.0)
         self.transcript.set_margin_start(10)
@@ -613,9 +608,7 @@ class Vicy(Gtk.Window):
         copied = copy_to_clipboard(text)
         clip = "copied to clipboard" if copied else "clipboard failed"
         self._flash_status(
-            f'<span foreground="#7bd88f">✓</span> {audio_secs:.0f}s audio '
-            f"in {took:.1f}s — {clip}",
-            8,
+            f"✓ {audio_secs:.0f}s audio in {took:.1f}s — {clip}", 8
         )
         self.transcript.set_text(text)
         self.revealer.set_reveal_child(True)
