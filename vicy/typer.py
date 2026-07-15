@@ -12,11 +12,16 @@ Preference order:
 import os
 import shutil
 import subprocess
+import sys
 import time
 
 from gi.repository import Gio, GLib
 
 from . import config
+
+
+def _log(*args):
+    print("[vicy.typer]", *args, file=sys.stderr, flush=True)
 
 KEY_LEFTCTRL = 29  # linux evdev keycodes
 KEY_V = 47
@@ -44,15 +49,26 @@ class PortalPaster:
         self._sender = None
         self._session = None
         self.ready = False
+        self._busy = False
         self._counter = 0
+        self._on_done = None
 
     def prepare(self):
+        """Start (or restart) the session handshake. Safe to call again
+        after a failure — e.g. a dismissed permission dialog."""
+        if self._busy or self.ready:
+            return
+        self._busy = True
+        self._session = None
         try:
-            self._bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-            self._sender = self._bus.get_unique_name()[1:].replace(".", "_")
+            if self._bus is None:
+                self._bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+                self._sender = self._bus.get_unique_name()[1:].replace(".", "_")
             self._create_session()
-        except Exception:
+        except Exception as exc:
+            _log("portal unavailable:", exc)
             self._bus = None
+            self._busy = False
 
     # -- Request/Response plumbing ------------------------------------
 
@@ -98,18 +114,27 @@ class PortalPaster:
     def _create_session(self):
         def on_response(code, results):
             if code != 0 or "session_handle" not in results:
+                _log("CreateSession failed, code", code)
+                self._busy = False
+                self._finish_paste(False)
                 return
             self._session = results["session_handle"]
             self._select_devices()
 
         opts = self._opts(on_response)
-        opts["session_handle_token"] = GLib.Variant("s", "vicy_session")
+        self._counter += 1
+        opts["session_handle_token"] = GLib.Variant(
+            "s", f"vicy_session{self._counter}"
+        )
         self._dbus_call("CreateSession", GLib.Variant("(a{sv})", (opts,)))
 
     def _select_devices(self):
         def on_response(code, _results):
             if code != 0:
+                _log("SelectDevices failed, code", code)
                 self._session = None
+                self._busy = False
+                self._finish_paste(False)
                 return
             self._start()
 
@@ -125,12 +150,18 @@ class PortalPaster:
 
     def _start(self):
         def on_response(code, results):
+            self._busy = False
             if code != 0:
+                _log("Start failed (dialog dismissed?), code", code)
                 self._session = None
+                self._finish_paste(False)
                 return
             if results.get("restore_token"):
                 self._save_token(results["restore_token"])
             self.ready = True
+            _log("portal session ready, devices:", results.get("devices"))
+            if self._on_done is not None:
+                self._fire()
 
         opts = self._opts(on_response)
         self._dbus_call(
@@ -156,8 +187,60 @@ class PortalPaster:
 
     # -- Injection -------------------------------------------------------
 
-    def paste(self) -> bool:
-        """Send Ctrl+V to the focused window. Returns success."""
+    def paste_async(self, on_done):
+        """Open a transient session (silent thanks to the restore token),
+        fire Ctrl+V at the focused window, then close the session so
+        GNOME's remote-control indicator only blinks for the paste
+        instead of living in the top bar. `on_done(ok)` reports the
+        outcome (False → caller should tell the user to paste manually)."""
+        self._on_done = on_done
+        if self.ready:
+            self._fire()
+            return
+        self.prepare()
+        if self._bus is None:  # portal completely unavailable
+            self._finish_paste(False)
+            return
+
+        def timeout():
+            if self._on_done is not None:
+                _log("paste timed out waiting for permission")
+                self._finish_paste(False)
+            return False
+
+        GLib.timeout_add_seconds(30, timeout)
+
+    def _fire(self):
+        ok = self._send_ctrl_v()
+        GLib.timeout_add(100, self._close_session)
+        self._finish_paste(ok)
+
+    def _finish_paste(self, ok):
+        cb, self._on_done = self._on_done, None
+        if cb is not None:
+            cb(ok)
+
+    def _close_session(self):
+        if self._session is not None:
+            try:
+                self._bus.call_sync(
+                    "org.freedesktop.portal.Desktop",
+                    self._session,
+                    "org.freedesktop.portal.Session",
+                    "Close",
+                    None,
+                    None,
+                    Gio.DBusCallFlags.NONE,
+                    -1,
+                    None,
+                )
+            except Exception as exc:
+                _log("session close failed:", exc)
+        self._session = None
+        self.ready = False
+        return False  # one-shot when scheduled via timeout_add
+
+    def _send_ctrl_v(self) -> bool:
         if not (self.ready and self._session):
             return False
         try:
@@ -173,7 +256,8 @@ class PortalPaster:
                 )
                 time.sleep(0.01)
             return True
-        except Exception:
+        except Exception as exc:
+            _log("key injection failed:", exc)
             self.ready = False
             return False
 
@@ -182,15 +266,13 @@ class Typer:
     """Best-effort text injection with graceful degradation."""
 
     def __init__(self):
-        self._portal = None
-        if _ydotool_socket() is None:
-            self._portal = PortalPaster()
-            self._portal.prepare()
+        # Sessions are opened per paste, so nothing to prepare up front.
+        self._portal = None if _ydotool_socket() else PortalPaster()
 
-    def inject(self, text: str) -> str:
+    def inject(self, text: str, on_fallback=None):
         """Deliver `text` to the focused app. The caller has already put
-        it on the clipboard. Returns the method used:
-        'type' | 'paste' | 'clipboard'."""
+        it on the clipboard; `on_fallback()` is invoked (possibly async)
+        if the user will have to paste manually."""
         sock = _ydotool_socket()
         if sock and shutil.which("ydotool"):
             try:
@@ -200,9 +282,13 @@ class Typer:
                     check=True,
                     timeout=30,
                 )
-                return "type"
-            except Exception:
-                pass
-        if self._portal is not None and self._portal.paste():
-            return "paste"
-        return "clipboard"
+                return
+            except Exception as exc:
+                _log("ydotool failed:", exc)
+        if self._portal is not None:
+            self._portal.paste_async(
+                lambda ok: (not ok and on_fallback and on_fallback())
+            )
+            return
+        if on_fallback is not None:
+            on_fallback()

@@ -292,7 +292,14 @@ class Vicy(Gtk.Window):
         return False
 
     def _deliver(self, text):
-        self.typer.inject(text)
+        def fallback():
+            notify(
+                "Copied — press Ctrl+V to paste",
+                "Auto-paste needs the input permission; approve the "
+                "dialog if one appeared.",
+            )
+
+        self.typer.inject(text, fallback)
         return False
 
 
