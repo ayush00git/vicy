@@ -1,6 +1,7 @@
 """The floating pill window: UI, state machine, and wiring."""
 
 import atexit
+import subprocess
 import threading
 import time
 
@@ -17,7 +18,16 @@ from .audio import Recorder, SpectrumAnalyzer
 from .clipboard import copy_to_clipboard
 from .ipc import IpcServer, send_command
 from .transcriber import Transcriber
+from .typer import Typer
 from .wave_view import WaveView
+
+
+def notify(summary, body=""):
+    """Desktop notification — the pill itself never shows text."""
+    try:
+        subprocess.Popen(["notify-send", "-a", "Vicy", summary, body])
+    except Exception:
+        pass
 
 
 class Vicy(Gtk.Window):
@@ -28,11 +38,11 @@ class Vicy(Gtk.Window):
         self.last_text = ""
         self._anim_id = None
         self._press_pos = None
-        self._status_seq = 0
 
         self.recorder = Recorder()
         self.analyzer = SpectrumAnalyzer()
         self.transcriber = Transcriber()
+        self.typer = Typer()
 
         self._build_window()
         self._ipc = IpcServer(self._handle_ipc)
@@ -62,6 +72,9 @@ class Vicy(Gtk.Window):
         self.set_skip_taskbar_hint(True)
         self.set_skip_pager_hint(True)
         self.set_keep_above(True)
+        # Never take keyboard focus: the user's cursor must stay in the
+        # app they're dictating into, or the auto-paste lands nowhere.
+        self.set_accept_focus(False)
         self.stick()
         self.set_app_paintable(True)
 
@@ -76,7 +89,7 @@ class Vicy(Gtk.Window):
             screen, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
 
-        pill = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        pill = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         pill.set_name("pill")
         pill.set_border_width(6)
         self.add(pill)
@@ -84,29 +97,6 @@ class Vicy(Gtk.Window):
         self.wave = WaveView()
         self.wave.set_tooltip_text("Click or Ctrl+M: record · drag to move")
         pill.pack_start(self.wave, True, True, 0)
-
-        self.status = Gtk.Label(label="Starting…")
-        self.status.set_name("status")
-        self.status.set_xalign(0.5)
-        self.status.set_ellipsize(3)  # Pango.EllipsizeMode.END
-        self.status.set_no_show_all(True)
-        self.status.show()
-        pill.pack_start(self.status, False, False, 0)
-
-        self.revealer = Gtk.Revealer()
-        self.revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
-        self.transcript = Gtk.Label(label="")
-        self.transcript.set_name("transcript")
-        self.transcript.set_line_wrap(True)
-        self.transcript.set_max_width_chars(26)
-        self.transcript.set_selectable(True)
-        self.transcript.set_xalign(0.0)
-        self.transcript.set_margin_start(10)
-        self.transcript.set_margin_end(10)
-        self.transcript.set_margin_top(4)
-        self.transcript.set_margin_bottom(6)
-        self.revealer.add(self.transcript)
-        pill.pack_start(self.revealer, False, False, 0)
 
         self.add_events(
             Gdk.EventMask.BUTTON_PRESS_MASK
@@ -116,7 +106,6 @@ class Vicy(Gtk.Window):
         self.connect("button-press-event", self._on_press)
         self.connect("button-release-event", self._on_release)
         self.connect("motion-notify-event", self._on_motion)
-        self.connect("key-press-event", self._on_key)
         self.connect("destroy", Gtk.main_quit)
 
         # Park near the top-center of the primary monitor.
@@ -156,12 +145,6 @@ class Vicy(Gtk.Window):
             return True
         return False
 
-    def _on_key(self, _w, event):
-        if event.keyval == Gdk.KEY_Escape:
-            self.revealer.set_reveal_child(False)
-            return True
-        return False
-
     def _popup_menu(self, event):
         menu = Gtk.Menu()
         group = None
@@ -191,40 +174,12 @@ class Vicy(Gtk.Window):
             self.model_name = name
             self._load_model_async(name)
 
-    def _set_status(self, markup):
-        if markup:
-            self.status.set_markup(markup)
-            self.status.show()
-        else:
-            self.status.hide()
-        return False  # usable directly with GLib.idle_add
-
-    def _flash_status(self, markup, secs=6):
-        """Show a status line, then clear it unless something replaced it."""
-        self._status_seq += 1
-        seq = self._status_seq
-
-        def clear():
-            if self._status_seq == seq:
-                self._set_status("")
-            return False
-
-        self._set_status(markup)
-        GLib.timeout_add_seconds(secs, clear)
-        return False
-
     # ---------- Model ----------
 
     def _load_model_async(self, name):
-        self._set_status(f"Loading <b>{name}</b> model…")
-
         def done(error):
             if error:
-                GLib.idle_add(self._set_status, f"Model error: {error}")
-            else:
-                GLib.idle_add(
-                    self._flash_status, f"Ready (<b>{name}</b>) — Ctrl+M or click"
-                )
+                GLib.idle_add(notify, "Model failed to load", str(error))
 
         self.transcriber.load_async(name, done)
 
@@ -245,7 +200,7 @@ class Vicy(Gtk.Window):
         try:
             self.recorder.start()
         except Exception as exc:
-            self._set_status(f"Mic error: {exc}")
+            notify("Microphone error", str(exc))
             return
 
         self.state = "recording"
@@ -253,8 +208,6 @@ class Vicy(Gtk.Window):
         self._last_voice = time.time()
         self._noise_floor = None
         self.wave.set_mode("recording")
-        self.revealer.set_reveal_child(False)
-        self._set_status("")
         self._start_anim()
 
     def _start_anim(self):
@@ -298,10 +251,8 @@ class Vicy(Gtk.Window):
 
         if len(audio) < config.MIN_SECONDS * config.SAMPLE_RATE:
             self._reset_idle()
-            self._flash_status("Too short — try again", 4)
             return
 
-        self._set_status("Transcribing…")
         threading.Thread(
             target=self._transcribe_worker, args=(audio,), daemon=True
         ).start()
@@ -309,45 +260,39 @@ class Vicy(Gtk.Window):
     # ---------- Transcription ----------
 
     def _transcribe_worker(self, audio):
-        t0 = time.time()
         try:
             text, peak = self.transcriber.transcribe(audio)
         except Exception as exc:
-            GLib.idle_add(self._set_status, f"Error: {exc}")
+            GLib.idle_add(notify, "Transcription error", str(exc))
             GLib.idle_add(self._reset_idle)
             return
-        GLib.idle_add(
-            self._finish,
-            text,
-            len(audio) / config.SAMPLE_RATE,
-            time.time() - t0,
-            peak,
-        )
+        GLib.idle_add(self._finish, text, peak)
 
     def _reset_idle(self):
         self.state = "idle"
         self.wave.set_mode("idle")
         return False
 
-    def _finish(self, text, audio_secs, took, peak=0.0):
+    def _finish(self, text, peak=0.0):
         self._reset_idle()
         if text is None:
-            self._flash_status("Model not loaded — try again", 6)
+            notify("Whisper model still loading", "Try again in a moment.")
             return False
         if not text:
-            hint = " — mic muted or too quiet?" if peak < 0.05 else ""
-            self._flash_status(
-                f"No speech detected (mic peak {peak * 100:.0f}%){hint}", 8
-            )
+            if peak < 0.05:
+                notify(
+                    "No speech detected",
+                    f"Mic peak was {peak * 100:.0f}% — muted or too quiet?",
+                )
             return False
         self.last_text = text
-        copied = copy_to_clipboard(text)
-        clip = "copied to clipboard" if copied else "clipboard failed"
-        self._flash_status(
-            f"✓ {audio_secs:.0f}s audio in {took:.1f}s — {clip}", 8
-        )
-        self.transcript.set_text(text)
-        self.revealer.set_reveal_child(True)
+        copy_to_clipboard(text)
+        # Small delay so the clipboard settles before the paste keystroke.
+        GLib.timeout_add(120, self._deliver, text)
+        return False
+
+    def _deliver(self, text):
+        self.typer.inject(text)
         return False
 
 

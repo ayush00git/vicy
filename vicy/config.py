@@ -48,7 +48,4 @@ CSS = b"""
     border-radius: 24px;
     border: 1px solid rgba(255, 255, 255, 0.12);
 }
-#pill label { color: #e8e8ee; font-size: 12px; }
-#pill label#status { color: #9a9aa4; font-size: 10px; }
-#pill label#transcript { color: #d8d8e0; font-size: 13px; }
 """
