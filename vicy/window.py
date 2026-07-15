@@ -301,8 +301,7 @@ class Vicy(Gtk.Window):
                 )
             return False
         self.last_text = text
-        copy_to_clipboard(text)
-        # Small delay so the clipboard settles before the paste keystroke.
+        # Small delay lets focus settle before keystrokes start landing.
         GLib.timeout_add(120, self._deliver, text)
         return False
 

@@ -270,9 +270,10 @@ class Typer:
         self._portal = None if _ydotool_socket() else PortalPaster()
 
     def inject(self, text: str, on_fallback=None):
-        """Deliver `text` to the focused app. The caller has already put
-        it on the clipboard; `on_fallback()` is invoked (possibly async)
-        if the user will have to paste manually."""
+        """Deliver `text` to the focused app. ydotool types it directly;
+        the clipboard is only touched on the portal/manual fallback paths
+        (which paste). `on_fallback()` is invoked (possibly async) if the
+        user will have to paste manually."""
         sock = _ydotool_socket()
         if sock and shutil.which("ydotool"):
             try:
@@ -285,6 +286,9 @@ class Typer:
                 return
             except Exception as exc:
                 _log("ydotool failed:", exc)
+        from .clipboard import copy_to_clipboard
+
+        copy_to_clipboard(text)  # fallback paths deliver via paste
         if self._portal is not None:
             self._portal.paste_async(
                 lambda ok: (not ok and on_fallback and on_fallback())

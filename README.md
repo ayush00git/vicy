@@ -1,8 +1,8 @@
 # Vicy
 
-A floating voice-to-text pill for Linux. Hit **Ctrl+M**, speak, pause — your
-words get typed wherever your cursor is. Runs OpenAI Whisper locally, so
-nothing ever leaves your machine.
+A floating voice-to-text pill for Linux. Hit **Ctrl+M**, speak, pause, and
+your words get typed wherever your cursor is. Runs OpenAI Whisper locally,
+so nothing ever leaves your machine.
 
 ## Install
 
@@ -17,4 +17,4 @@ sudo dnf install -y ydotool && sudo systemctl enable --now ydotool.service
 
 ## Credits
 
-**Dev** — Claude Fable 5 · **Arch** — Ayush
+**Dev**: Claude Fable 5 · **Arch**: Ayush
